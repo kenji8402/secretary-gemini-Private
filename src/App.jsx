@@ -348,10 +348,10 @@ function FileAnalysisView() {
   const [error, setError] = useState("");
   const [truncated, setTruncated] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
   const fileRef = useRef(null);
 
-  async function onPick(e) {
-    const file = e.target.files && e.target.files[0];
+  async function handleFile(file) {
     if (!file) return;
     setError(""); setResult(""); setTruncated(false); setStep("extracting"); setFileName(file.name);
     try {
@@ -366,6 +366,8 @@ function FileAnalysisView() {
       setFileName(""); setDocText(""); setStep("input");
     }
   }
+  function onPick(e) { handleFile(e.target.files && e.target.files[0]); }
+  function onDrop(e) { e.preventDefault(); setDragOver(false); handleFile(e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]); }
 
   async function analyze() {
     if (!docText) return;
@@ -418,9 +420,15 @@ function FileAnalysisView() {
       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
         <div>
           <label style={{ fontSize: 11, color: "#4A5580", fontWeight: 600, display: "block", marginBottom: 5 }}>ファイル <span style={{ color: "#FF6B6B" }}>*</span></label>
-          <button onClick={() => fileRef.current && fileRef.current.click()} style={{ width: "100%", padding: "18px", borderRadius: 12, border: "1px dashed #2A3555", background: "#1E2740", color: fileName ? "#E8EDFF" : "#4A5580", cursor: "pointer", fontSize: 13, fontWeight: 600 }}>
-            {fileName ? `📄 ${fileName}` : "クリックしてファイルを選択"}
-          </button>
+          <div
+            onClick={() => fileRef.current && fileRef.current.click()}
+            onDragOver={e => { e.preventDefault(); setDragOver(true); }}
+            onDragLeave={() => setDragOver(false)}
+            onDrop={onDrop}
+            style={{ width: "100%", padding: "26px 18px", borderRadius: 12, border: dragOver ? "2px dashed #6C9FFF" : "1px dashed #2A3555", background: dragOver ? "rgba(108,159,255,0.12)" : "#1E2740", color: fileName ? "#E8EDFF" : "#4A5580", cursor: "pointer", fontSize: 13, fontWeight: 600, textAlign: "center", transition: "all 0.15s" }}
+          >
+            {fileName ? `📄 ${fileName}` : (dragOver ? "ここにドロップしてください" : "クリックで選択、または ここにドラッグ＆ドロップ")}
+          </div>
           <input ref={fileRef} type="file" onChange={onPick} accept=".txt,.md,.markdown,.csv,.tsv,.json,.log,.xml,.yml,.yaml,.html,.htm,.pdf,.docx,.xlsx,.xls" style={{ display: "none" }} />
           <div style={{ fontSize: 11, color: "#4A5580", marginTop: 6 }}>対応形式: PDF / Word(.docx) / Excel(.xlsx) / テキスト / CSV / Markdown など</div>
           {truncated && <div style={{ fontSize: 11, color: "#FFD93D", marginTop: 6 }}>※文書が長いため、先頭の約{MAX_DOC_CHARS.toLocaleString()}文字のみを解析対象にしています。</div>}
@@ -478,6 +486,7 @@ export default function AISecretary() {
   const NAV = [{ key: "chat", icon: "💬", label: "チャット" }, { key: "email", icon: "📨", label: "返信" }, { key: "minutes", icon: "📝", label: "議事録" }, { key: "file", icon: "📎", label: "ファイル" }, { key: "tasks", icon: "✅", label: "タスク" }];
 
   const isLM = backend === "lmstudio";
+  const onLocal = typeof window !== "undefined" && window.location && (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
 
   return (
     <div style={{ height: "100dvh", background: "#0A0E1A", color: "#B8C7FF", fontFamily: "'Inter', system-ui, sans-serif", display: "flex", flexDirection: "column", overflow: "hidden" }}>
@@ -497,14 +506,21 @@ export default function AISecretary() {
             <div style={{ width: 28, height: 28, borderRadius: "50%", background: "linear-gradient(135deg, #6C9FFF, #A78BFA)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, boxShadow: "0 0 10px rgba(108,159,255,0.4)", flexShrink: 0 }}>🤖</div>
             <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
               <span style={{ fontSize: 13, fontWeight: 700, color: "#E8EDFF" }}>AI秘書</span>
-              <button onClick={toggleBackend} title="PCの接続先を切り替え（スマホは常にGemini）" style={{
-                display: "flex", alignItems: "center", gap: 4, padding: "2px 8px", borderRadius: 12,
-                border: "1px solid", borderColor: isLM ? "rgba(108,159,255,0.5)" : "rgba(167,139,250,0.5)",
-                background: isLM ? "rgba(108,159,255,0.12)" : "rgba(167,139,250,0.12)",
-                color: isLM ? "#6C9FFF" : "#A78BFA", cursor: "pointer", fontSize: 10, fontWeight: 700, whiteSpace: "nowrap"
-              }}>
-                <span>{isLM ? "🖥" : "☁"}</span>{isLM ? "LM Studio" : "Gemini"}<span style={{ opacity: 0.6, fontWeight: 400 }}>切替</span>
-              </button>
+              <div style={{ display: "flex", gap: 4 }}>
+                <button onClick={toggleBackend} title="PCの接続先を切り替え（スマホは常にGemini）" style={{
+                  display: "flex", alignItems: "center", gap: 4, padding: "2px 8px", borderRadius: 12,
+                  border: "1px solid", borderColor: isLM ? "rgba(108,159,255,0.5)" : "rgba(167,139,250,0.5)",
+                  background: isLM ? "rgba(108,159,255,0.12)" : "rgba(167,139,250,0.12)",
+                  color: isLM ? "#6C9FFF" : "#A78BFA", cursor: "pointer", fontSize: 10, fontWeight: 700, whiteSpace: "nowrap"
+                }}>
+                  <span>{isLM ? "🖥" : "☁"}</span>{isLM ? "LM Studio" : "Gemini"}<span style={{ opacity: 0.6, fontWeight: 400 }}>切替</span>
+                </button>
+                {!onLocal && <a href="http://localhost:8080" title="ローカル(LM Studio)版を開く ※同じPCでサーバー起動が必要" style={{
+                  display: "flex", alignItems: "center", gap: 3, padding: "2px 8px", borderRadius: 12,
+                  border: "1px solid rgba(108,159,255,0.4)", background: "transparent",
+                  color: "#6C9FFF", fontSize: 10, fontWeight: 700, whiteSpace: "nowrap", textDecoration: "none"
+                }}>🖥 ローカル版を開く</a>}
+              </div>
             </div>
           </div>
           <div style={{ display: "flex", gap: 3, flexWrap: "wrap", justifyContent: "flex-end" }}>
