@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 
-const APP_VERSION = "1.4 (2026-06-28)";
+const APP_VERSION = "1.5 (2026-06-28)";
 
 const SYSTEM_PROMPT = `あなたは優秀なAI秘書です。ユーザーの仕事を効率的にサポートします。
 
@@ -171,6 +171,93 @@ async function extractFileText(file) {
   throw new Error("対応形式: txt / md / csv / json / pdf / docx / xlsx など。この形式は未対応です。");
 }
 
+// ===== 書き出し（ダウンロード／印刷）ヘルパー =====
+function downloadFile(filename, content, mime) {
+  try {
+    const blob = new Blob([content], { type: mime });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = filename; document.body.appendChild(a); a.click();
+    setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 1000);
+  } catch (e) {}
+}
+function safeName(s2) { return (s2 || "export").replace(/[\\/:*?"<>|]/g, "_").slice(0, 40); }
+function downloadMarkdown(name, md) { downloadFile(safeName(name) + ".md", md || "", "text/markdown;charset=utf-8"); }
+function downloadWord(name, title, md) {
+  const html = "<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word'><head><meta charset='utf-8'><title>" + escapeHtml(title) + "</title></head><body>" + renderMarkdown(md) + "</body></html>";
+  downloadFile(safeName(name) + ".doc", "﻿" + html, "application/msword");
+}
+function printAsPdf(title, md) {
+  const w = window.open("", "_blank");
+  if (!w) return;
+  w.document.write("<html><head><meta charset='utf-8'><title>" + escapeHtml(title) + "</title><style>body{font-family:'Segoe UI','Meiryo',sans-serif;line-height:1.8;padding:28px;color:#111;max-width:760px;margin:auto}h3,h4,h5{margin:14px 0 4px}ul,ol{padding-left:22px}code{background:#eee;padding:1px 4px;border-radius:3px}pre{background:#f4f4f4;padding:10px;border-radius:6px;white-space:pre-wrap}</style></head><body>" + renderMarkdown(md) + "</body></html>");
+  w.document.close(); w.focus(); setTimeout(() => { try { w.print(); } catch (e) {} }, 350);
+}
+function chatToMarkdown(msgs) { return "# AI秘書 チャット履歴\n\n" + msgs.map(m => (m.role === "user" ? "### 🧑 あなた\n" : "### 🤖 AI秘書\n") + m.content).join("\n\n"); }
+
+function ExportBar({ name, title, markdown }) {
+  const btn = { padding: "5px 11px", borderRadius: 8, border: "1px solid #2A3555", background: "transparent", color: "#6C9FFF", cursor: "pointer", fontSize: 12, fontWeight: 600 };
+  return (
+    <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
+      <button style={btn} onClick={() => downloadMarkdown(name, markdown)}>⬇ Markdown</button>
+      <button style={btn} onClick={() => downloadWord(name, title, markdown)}>⬇ Word</button>
+      <button style={btn} onClick={() => printAsPdf(title, markdown)}>🖨 PDF / 印刷</button>
+    </div>
+  );
+}
+
+const TRANSLATE_PROMPT = "あなたはプロの翻訳者です。入力されたテキストを指定言語へ自然で正確に翻訳します。原文の意味・トーン・敬体/常体を尊重し、訳文だけを返してください（解説や注釈は不要）。固有名詞や専門用語は適切に扱ってください。";
+
+function TranslateView() {
+  const LANGS = [["日本語", "日本語"], ["英語", "English"], ["中国語", "中文（簡体）"], ["韓国語", "한국어"], ["フランス語", "Français"], ["スペイン語", "Español"]];
+  const [text, setText] = useState("");
+  const [target, setTarget] = useState("英語");
+  const [result, setResult] = useState("");
+  const [step, setStep] = useState("input");
+  const [error, setError] = useState("");
+  const [copied, setCopied] = useState(false);
+  async function run() {
+    if (!text.trim()) return;
+    setStep("loading"); setError("");
+    try {
+      const data = await callClaude({ system: TRANSLATE_PROMPT, max_tokens: 4000, messages: [{ role: "user", content: "次のテキストを" + target + "に翻訳してください。\n\n" + text }] });
+      setResult(data.content?.[0]?.text || "（応答が空でした）"); setStep("result");
+    } catch (e) { setError("翻訳に失敗しました：" + e.message); setStep("input"); }
+  }
+  if (step === "loading") return (
+    <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 20, padding: 24 }}>
+      <div style={{ width: 56, height: 56, borderRadius: "50%", background: "linear-gradient(135deg, #6C9FFF, #A78BFA)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 24, animation: "glow 2s ease-in-out infinite" }}>🌐</div>
+      <div style={{ fontSize: 15, fontWeight: 600, color: "#E8EDFF" }}>翻訳中...</div>
+      <div style={{ display: "flex", gap: 6 }}>{[0,1,2].map(i => <div key={i} style={{ width: 10, height: 10, borderRadius: "50%", background: "#6C9FFF", animation: `pulse 1.2s ease-in-out ${i*0.2}s infinite` }} />)}</div>
+    </div>
+  );
+  return (
+    <div style={{ flex: 1, overflowY: "auto", padding: 20 }}>
+      <div style={{ marginBottom: 16 }}><div style={{ fontSize: 16, fontWeight: 700, color: "#E8EDFF", marginBottom: 3 }}>🌐 翻訳</div><div style={{ fontSize: 12, color: "#4A5580" }}>テキストを入力して、訳す言語を選んでください</div></div>
+      {error && <div style={{ background: "rgba(255,107,107,0.1)", border: "1px solid rgba(255,107,107,0.3)", borderRadius: 10, padding: "10px 14px", marginBottom: 14, fontSize: 13, color: "#FF6B6B" }}>{error}</div>}
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        <div>
+          <label style={{ fontSize: 11, color: "#4A5580", fontWeight: 600, display: "block", marginBottom: 5 }}>訳す言語</label>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+            {LANGS.map(([k, l]) => <button key={k} onClick={() => setTarget(k)} style={{ padding: "6px 12px", borderRadius: 16, border: "1px solid", borderColor: target === k ? "#6C9FFF" : "#2A3555", background: target === k ? "rgba(108,159,255,0.15)" : "transparent", color: target === k ? "#6C9FFF" : "#B8C7FF", cursor: "pointer", fontSize: 12, fontWeight: 600 }}>{l}</button>)}
+          </div>
+        </div>
+        <div><label style={{ fontSize: 11, color: "#4A5580", fontWeight: 600, display: "block", marginBottom: 5 }}>原文 <span style={{ color: "#FF6B6B" }}>*</span></label><textarea value={text} onChange={e => setText(e.target.value)} placeholder="翻訳したいテキストを入力または貼り付け..." rows={8} style={{ width: "100%", background: "#1E2740", border: "1px solid #2A3555", borderRadius: 10, padding: "11px 13px", color: "#E8EDFF", fontSize: 13, outline: "none", fontFamily: "inherit", resize: "vertical", lineHeight: 1.7 }} /></div>
+        <button onClick={run} disabled={!text.trim()} style={{ padding: "12px", borderRadius: 12, border: "none", background: text.trim() ? "linear-gradient(135deg, #6C9FFF, #818CF8)" : "#2A3555", color: "#fff", cursor: text.trim() ? "pointer" : "default", fontSize: 14, fontWeight: 700 }}>🌐 {target}に翻訳する</button>
+      </div>
+      {step === "result" && result && (
+        <div style={{ marginTop: 16 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+            <span style={{ fontSize: 11, color: "#6C9FFF", fontWeight: 600 }}>訳文（{target}）</span>
+            <button onClick={() => { navigator.clipboard.writeText(result); setCopied(true); setTimeout(() => setCopied(false), 2000); }} style={{ padding: "5px 12px", borderRadius: 8, border: "1px solid #2A3555", background: copied ? "rgba(74,222,128,0.15)" : "transparent", color: copied ? "#4ADE80" : "#6C9FFF", cursor: "pointer", fontSize: 12, fontWeight: 600 }}>{copied ? "✓ コピー済" : "📋 コピー"}</button>
+          </div>
+          <div style={{ background: "#1E2740", borderRadius: 14, padding: 16, border: "1px solid #2A3555", fontSize: 14, color: "#E8EDFF", lineHeight: 1.9, whiteSpace: "pre-wrap" }}>{result}</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function TypingIndicator() {
   return (
     <div style={{ display: "flex", gap: 5, alignItems: "center", padding: "12px 16px" }}>
@@ -254,7 +341,10 @@ function EmailReplyView() {
           <div style={{ background: "#1E2740", borderRadius: 14, border: "1px solid #2A3555", overflow: "hidden", marginBottom: 14 }}>
             <div style={{ padding: "11px 14px", borderBottom: "1px solid #2A3555", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <div><div style={{ fontSize: 11, color: "#4A5580", marginBottom: 3 }}>件名</div><div style={{ fontSize: 13, color: "#E8EDFF", fontWeight: 600 }}>{reply.subject}</div></div>
-              <button onClick={() => copy(`件名: ${reply.subject}\n\n${reply.body}`)} style={{ padding: "5px 12px", borderRadius: 8, border: "1px solid #2A3555", background: copied ? "rgba(74,222,128,0.15)" : "transparent", color: copied ? "#4ADE80" : "#6C9FFF", cursor: "pointer", fontSize: 12, fontWeight: 600 }}>{copied ? "✓ コピー済" : "📋 コピー"}</button>
+              <div style={{ display: "flex", gap: 6 }}>
+                <a href={`mailto:?subject=${encodeURIComponent(reply.subject)}&body=${encodeURIComponent(reply.body)}`} style={{ padding: "5px 11px", borderRadius: 8, border: "1px solid #2A3555", color: "#6C9FFF", fontSize: 12, fontWeight: 600, textDecoration: "none" }}>✉️ メールで開く</a>
+                <button onClick={() => copy(`件名: ${reply.subject}\n\n${reply.body}`)} style={{ padding: "5px 12px", borderRadius: 8, border: "1px solid #2A3555", background: copied ? "rgba(74,222,128,0.15)" : "transparent", color: copied ? "#4ADE80" : "#6C9FFF", cursor: "pointer", fontSize: 12, fontWeight: 600 }}>{copied ? "✓ コピー済" : "📋 コピー"}</button>
+              </div>
             </div>
             <div style={{ padding: 14 }}><div style={{ fontSize: 11, color: "#4A5580", marginBottom: 6 }}>本文</div><div style={{ fontSize: 13, color: "#B8C7FF", lineHeight: 1.9, whiteSpace: "pre-wrap" }}>{reply.body}</div></div>
           </div>
@@ -325,6 +415,7 @@ function MinutesView() {
   if (step === "result" && result) return (
     <div style={{ flex: 1, overflowY: "auto", padding: 20 }}>
       <div style={{ marginBottom: 14 }}><div style={{ fontSize: 15, fontWeight: 700, color: "#E8EDFF", marginBottom: 2 }}>{result.title}</div><div style={{ fontSize: 12, color: "#4A5580" }}>{result.date !== "不明" ? result.date : ""}{result.attendees?.length ? ` · 参加者 ${result.attendees.length}名` : ""}</div></div>
+      <ExportBar name={result.title || "議事録"} title={result.title || "議事録"} markdown={result.fullMinutes || result.summary || ""} />
       <div style={{ display: "flex", gap: 6, marginBottom: 14, background: "#1E2740", borderRadius: 10, padding: 4 }}>
         {[["overview","概要"],["actions","アクション"],["full","議事録全文"]].map(([k,l]) => <button key={k} onClick={() => setTab(k)} style={{ flex: 1, padding: "7px 0", borderRadius: 8, border: "none", background: tab===k ? "rgba(108,159,255,0.2)" : "transparent", color: tab===k ? "#6C9FFF" : "#4A5580", cursor: "pointer", fontSize: 12, fontWeight: 600 }}>{l}</button>)}
       </div>
@@ -424,6 +515,7 @@ function FileAnalysisView() {
         <span style={{ fontSize: 12, color: "#6C9FFF", fontWeight: 600 }}>📎 {fileName}</span>
         <button onClick={copyResult} style={{ padding: "5px 12px", borderRadius: 8, border: "1px solid #2A3555", background: copied ? "rgba(74,222,128,0.15)" : "transparent", color: copied ? "#4ADE80" : "#6C9FFF", cursor: "pointer", fontSize: 12, fontWeight: 600 }}>{copied ? "✓ コピー済" : "📋 コピー"}</button>
       </div>
+      <ExportBar name={fileName || "解析結果"} title={"解析結果 " + fileName} markdown={result} />
       <div style={{ background: "#1E2740", borderRadius: 14, padding: 16, border: "1px solid #2A3555", marginBottom: 14 }}><Markdown text={result} /></div>
       <button onClick={reset} style={{ width: "100%", padding: 11, borderRadius: 10, border: "1px solid #2A3555", background: "transparent", color: "#4A5580", cursor: "pointer", fontSize: 13 }}>← 別のファイルを解析する</button>
     </div>
@@ -485,6 +577,21 @@ export default function AISecretary() {
 
   function toggleBackend() { const next = backend === "lmstudio" ? "gemini" : "lmstudio"; setBackend(next); try { localStorage.setItem(BACKEND_KEY, next); } catch {} }
 
+  // 回答を少しずつ表示するストリーミング風の演出
+  function revealAssistant(full) {
+    return new Promise(resolve => {
+      setMessages(prev => [...prev, { role: "assistant", content: "" }]);
+      const total = full.length, steps = 36, dur = Math.min(1200, Math.max(250, total * 6));
+      let st = 0;
+      const id = setInterval(() => {
+        st++;
+        const idx = Math.ceil((total * st) / steps);
+        setMessages(prev => { const c = prev.slice(); c[c.length - 1] = { role: "assistant", content: full.slice(0, idx) }; return c; });
+        if (st >= steps) { clearInterval(id); resolve(); }
+      }, dur / steps);
+    });
+  }
+
   async function sendMessage(text) {
     if (!text.trim() || loading) return;
     const userMsg = { role: "user", content: text };
@@ -497,14 +604,14 @@ export default function AISecretary() {
     try {
       const data = await callClaude({ system: sys, messages: payloadMsgs });
       setGeminiCount(getGeminiCount());
-      setMessages(prev => [...prev, { role: "assistant", content: data.content?.[0]?.text || "エラーが発生しました。" }]);
+      await revealAssistant(data.content?.[0]?.text || "エラーが発生しました。");
     } catch (e) {
       const quota = /上限|quota|429|exceeded/i.test(e.message);
       if (quota && onLocal && getBackend() === "gemini") {
         try {
           setBackend("lmstudio"); try { localStorage.setItem(BACKEND_KEY, "lmstudio"); } catch {}
           const data2 = await callClaude({ system: sys, messages: payloadMsgs });
-          setMessages(prev => [...prev, { role: "assistant", content: "（Geminiが上限のためLM Studioに切り替えました）\n\n" + (data2.content?.[0]?.text || "") }]);
+          await revealAssistant("（Geminiが上限のためLM Studioに切り替えました）\n\n" + (data2.content?.[0]?.text || ""));
           setLoading(false); return;
         } catch (e2) { e = e2; }
       }
@@ -532,7 +639,7 @@ export default function AISecretary() {
 
   function handleKey(e) { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(input); } }
   const priorityColor = { high: "#FF6B6B", medium: "#FFD93D", low: "#6BCB77" };
-  const NAV = [{ key: "chat", icon: "💬", label: "チャット" }, { key: "email", icon: "📨", label: "返信" }, { key: "minutes", icon: "📝", label: "議事録" }, { key: "file", icon: "📎", label: "ファイル" }, { key: "tasks", icon: "✅", label: "タスク" }];
+  const NAV = [{ key: "chat", icon: "💬", label: "チャット" }, { key: "email", icon: "📨", label: "返信" }, { key: "minutes", icon: "📝", label: "議事録" }, { key: "file", icon: "📎", label: "ファイル" }, { key: "translate", icon: "🌐", label: "翻訳" }, { key: "tasks", icon: "✅", label: "タスク" }];
   const iconBtn = { width: 34, height: 34, borderRadius: 10, border: "1px solid #2A3555", background: "transparent", color: "#6C9FFF", cursor: "pointer", fontSize: 15, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" };
 
   return (
@@ -587,7 +694,8 @@ export default function AISecretary() {
                 <span style={{ fontSize: 13 }}>{a.icon}</span>{a.label}
               </button>
             ))}
-            <button onClick={clearChat} title="チャット履歴をクリア" style={{ marginLeft: "auto", padding: "4px 10px", borderRadius: 14, border: "1px solid #2A3555", background: "transparent", color: "#4A5580", cursor: "pointer", fontSize: 12, whiteSpace: "nowrap" }}>🗑 履歴</button>
+            <button onClick={() => downloadMarkdown("チャット履歴", chatToMarkdown(messages))} title="会話をMarkdownで保存" style={{ marginLeft: "auto", padding: "4px 10px", borderRadius: 14, border: "1px solid #2A3555", background: "transparent", color: "#6C9FFF", cursor: "pointer", fontSize: 12, whiteSpace: "nowrap" }}>⬇ 保存</button>
+            <button onClick={clearChat} title="チャット履歴をクリア" style={{ padding: "4px 10px", borderRadius: 14, border: "1px solid #2A3555", background: "transparent", color: "#4A5580", cursor: "pointer", fontSize: 12, whiteSpace: "nowrap" }}>🗑 履歴</button>
           </div>
         )}
       </div>
@@ -641,6 +749,7 @@ export default function AISecretary() {
         {view === "email" && <EmailReplyView />}
         {view === "minutes" && <MinutesView />}
         {view === "file" && <FileAnalysisView />}
+        {view === "translate" && <TranslateView />}
         {view === "tasks" && (
           <div style={{ flex: 1, overflowY: "auto", padding: 20, WebkitOverflowScrolling: "touch" }}>
             <div style={{ marginBottom: 16 }}><div style={{ fontSize: 16, fontWeight: 700, color: "#E8EDFF", marginBottom: 3 }}>タスク管理</div><div style={{ fontSize: 12, color: "#4A5580" }}>{tasks.filter(t => !t.done).length}件のタスクが残っています</div></div>
