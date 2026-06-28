@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 
-const APP_VERSION = "1.5 (2026-06-28)";
+const APP_VERSION = "1.6 (2026-06-28)";
 
 const SYSTEM_PROMPT = `あなたは優秀なAI秘書です。ユーザーの仕事を効率的にサポートします。
 
@@ -195,11 +195,11 @@ function printAsPdf(title, md) {
 }
 function chatToMarkdown(msgs) { return "# AI秘書 チャット履歴\n\n" + msgs.map(m => (m.role === "user" ? "### 🧑 あなた\n" : "### 🤖 AI秘書\n") + m.content).join("\n\n"); }
 
-function ExportBar({ name, title, markdown }) {
+function ExportBar({ name, title, markdown, noMarkdown }) {
   const btn = { padding: "5px 11px", borderRadius: 8, border: "1px solid #2A3555", background: "transparent", color: "#6C9FFF", cursor: "pointer", fontSize: 12, fontWeight: 600 };
   return (
     <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
-      <button style={btn} onClick={() => downloadMarkdown(name, markdown)}>⬇ Markdown</button>
+      {!noMarkdown && <button style={btn} onClick={() => downloadMarkdown(name, markdown)}>⬇ Markdown</button>}
       <button style={btn} onClick={() => downloadWord(name, title, markdown)}>⬇ Word</button>
       <button style={btn} onClick={() => printAsPdf(title, markdown)}>🖨 PDF / 印刷</button>
     </div>
@@ -211,7 +211,7 @@ const TRANSLATE_PROMPT = "あなたはプロの翻訳者です。入力された
 function TranslateView() {
   const LANGS = [["日本語", "日本語"], ["英語", "English"], ["中国語", "中文（簡体）"], ["韓国語", "한국어"], ["フランス語", "Français"], ["スペイン語", "Español"]];
   const [text, setText] = useState("");
-  const [target, setTarget] = useState("英語");
+  const [target, setTarget] = useState(() => { try { return localStorage.getItem("ai_sec_lang") || "英語"; } catch { return "英語"; } });
   const [result, setResult] = useState("");
   const [step, setStep] = useState("input");
   const [error, setError] = useState("");
@@ -239,7 +239,7 @@ function TranslateView() {
         <div>
           <label style={{ fontSize: 11, color: "#4A5580", fontWeight: 600, display: "block", marginBottom: 5 }}>訳す言語</label>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-            {LANGS.map(([k, l]) => <button key={k} onClick={() => setTarget(k)} style={{ padding: "6px 12px", borderRadius: 16, border: "1px solid", borderColor: target === k ? "#6C9FFF" : "#2A3555", background: target === k ? "rgba(108,159,255,0.15)" : "transparent", color: target === k ? "#6C9FFF" : "#B8C7FF", cursor: "pointer", fontSize: 12, fontWeight: 600 }}>{l}</button>)}
+            {LANGS.map(([k, l]) => <button key={k} onClick={() => { setTarget(k); try { localStorage.setItem("ai_sec_lang", k); } catch {} }} style={{ padding: "6px 12px", borderRadius: 16, border: "1px solid", borderColor: target === k ? "#6C9FFF" : "#2A3555", background: target === k ? "rgba(108,159,255,0.15)" : "transparent", color: target === k ? "#6C9FFF" : "#B8C7FF", cursor: "pointer", fontSize: 12, fontWeight: 600 }}>{l}</button>)}
           </div>
         </div>
         <div><label style={{ fontSize: 11, color: "#4A5580", fontWeight: 600, display: "block", marginBottom: 5 }}>原文 <span style={{ color: "#FF6B6B" }}>*</span></label><textarea value={text} onChange={e => setText(e.target.value)} placeholder="翻訳したいテキストを入力または貼り付け..." rows={8} style={{ width: "100%", background: "#1E2740", border: "1px solid #2A3555", borderRadius: 10, padding: "11px 13px", color: "#E8EDFF", fontSize: 13, outline: "none", fontFamily: "inherit", resize: "vertical", lineHeight: 1.7 }} /></div>
@@ -415,7 +415,7 @@ function MinutesView() {
   if (step === "result" && result) return (
     <div style={{ flex: 1, overflowY: "auto", padding: 20 }}>
       <div style={{ marginBottom: 14 }}><div style={{ fontSize: 15, fontWeight: 700, color: "#E8EDFF", marginBottom: 2 }}>{result.title}</div><div style={{ fontSize: 12, color: "#4A5580" }}>{result.date !== "不明" ? result.date : ""}{result.attendees?.length ? ` · 参加者 ${result.attendees.length}名` : ""}</div></div>
-      <ExportBar name={result.title || "議事録"} title={result.title || "議事録"} markdown={result.fullMinutes || result.summary || ""} />
+      <ExportBar name={result.title || "議事録"} title={result.title || "議事録"} markdown={result.fullMinutes || result.summary || ""} noMarkdown />
       <div style={{ display: "flex", gap: 6, marginBottom: 14, background: "#1E2740", borderRadius: 10, padding: 4 }}>
         {[["overview","概要"],["actions","アクション"],["full","議事録全文"]].map(([k,l]) => <button key={k} onClick={() => setTab(k)} style={{ flex: 1, padding: "7px 0", borderRadius: 8, border: "none", background: tab===k ? "rgba(108,159,255,0.2)" : "transparent", color: tab===k ? "#6C9FFF" : "#4A5580", cursor: "pointer", fontSize: 12, fontWeight: 600 }}>{l}</button>)}
       </div>
@@ -694,8 +694,7 @@ export default function AISecretary() {
                 <span style={{ fontSize: 13 }}>{a.icon}</span>{a.label}
               </button>
             ))}
-            <button onClick={() => downloadMarkdown("チャット履歴", chatToMarkdown(messages))} title="会話をMarkdownで保存" style={{ marginLeft: "auto", padding: "4px 10px", borderRadius: 14, border: "1px solid #2A3555", background: "transparent", color: "#6C9FFF", cursor: "pointer", fontSize: 12, whiteSpace: "nowrap" }}>⬇ 保存</button>
-            <button onClick={clearChat} title="チャット履歴をクリア" style={{ padding: "4px 10px", borderRadius: 14, border: "1px solid #2A3555", background: "transparent", color: "#4A5580", cursor: "pointer", fontSize: 12, whiteSpace: "nowrap" }}>🗑 履歴</button>
+            <button onClick={clearChat} title="チャット履歴をクリア" style={{ marginLeft: "auto", padding: "4px 10px", borderRadius: 14, border: "1px solid #2A3555", background: "transparent", color: "#4A5580", cursor: "pointer", fontSize: 12, whiteSpace: "nowrap" }}>🗑 履歴</button>
           </div>
         )}
       </div>
